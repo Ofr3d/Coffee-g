@@ -1,30 +1,28 @@
 import { useState, useEffect, useRef } from "react";
+import { supabase } from "./supabase";
 
 // ─── Logo ─────────────────────────────────────────────────────────────────────
 const LOGO_URI = "/logo.png";
 
-// ─── Storage helpers ───────────────────────────────────────────────────────
-const sk = (uid, key) => `coffeeg:${uid}:${key}`;
-const gset = async (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
-const gget = async (key) => { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch { return null; } };
-
-// ─── Constants ─────────────────────────────────────────────────────────────
-const USERS_KEY = "coffeeg:users";
-const ACTIVE_USER_KEY = "coffeeg:activeUser";
-const FIRST_LAUNCH_KEY = "coffeeg:firstLaunch";
-const RATE_KEY = "coffeeg:rate";
-
-const hashPassword = async (pw) => {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+// ─── Storage helpers (Supabase) ────────────────────────────────────────────
+const gset = async (uid, key, val) => {
+  try {
+    await supabase.from("user_data").upsert(
+      { user_id: uid, key, value: val, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,key" }
+    );
+  } catch {}
+};
+const gget = async (uid, key) => {
+  try {
+    const { data } = await supabase.from("user_data")
+      .select("value").eq("user_id", uid).eq("key", key).maybeSingle();
+    return data?.value ?? null;
+  } catch { return null; }
 };
 
-const makeUser = (name, email, passwordHash) => ({
-  id: Math.random().toString(36).slice(2),
-  name, email, passwordHash,
-  identityEnabled: true,
-  createdAt: Date.now(),
-});
+// ─── Constants ─────────────────────────────────────────────────────────────
+const FIRST_LAUNCH_KEY = "coffeeg:firstLaunch";
 
 const makePreset = (name = "My Rig") => ({
   id: Math.random().toString(36).slice(2),
@@ -213,11 +211,10 @@ function GearForm({ initial, onSave, onCancel, S, C }) {
 // ─── Main App ──────────────────────────────────────────────────────────────
 export default function App() {
   // Auth state
-  const [users, setUsers] = useState([]);
   const [activeUser, setActiveUser] = useState(null);
-  const [screen, setScreen] = useState("loading"); // loading | intro | login | app
+  const [screen, setScreen] = useState("loading"); // loading | intro | login | reset | app
   const [showIntro, setShowIntro] = useState(false);
-  const [loginMode, setLoginMode] = useState("signin"); // signin | signup
+  const [loginMode, setLoginMode] = useState("signin"); // signin | signup | forgot
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -228,6 +225,14 @@ export default function App() {
   const [newPassword2, setNewPassword2] = useState("");
   const [showSignupPass, setShowSignupPass] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [signUpMessage, setSignUpMessage] = useState("");
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotError, setForgotError] = useState("");
+  const [resetPass, setResetPass] = useState("");
+  const [resetPass2, setResetPass2] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [resetDone, setResetDone] = useState(false);
 
   // App state (per-user, loaded on login)
   const [tab, setTab] = useState("dial");
@@ -283,106 +288,118 @@ export default function App() {
 
   // ── Boot ──
   useEffect(() => {
+    const fl = localStorage.getItem(FIRST_LAUNCH_KEY);
+    if (!fl) { localStorage.setItem(FIRST_LAUNCH_KEY, "1"); setShowIntro(true); }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "PASSWORD_RECOVERY") { setScreen("reset"); return; }
+      if (session?.user) { await loadUser(session.user); }
+      else { setActiveUser(null); setScreen("login"); setLoginMode("signin"); }
+    });
+
     (async () => {
-      const fl = await gget(FIRST_LAUNCH_KEY);
-      if (!fl) { await gset(FIRST_LAUNCH_KEY, true); setShowIntro(true); }
-      let u = await gget(USERS_KEY) || [];
-      // Migrate: drop any legacy PIN-only users (no email) that can't sign in
-      const validUsers = u.filter(x => x.email && x.passwordHash);
-      if (validUsers.length !== u.length) {
-        await gset(USERS_KEY, validUsers);
-        u = validUsers;
-      }
-      const aid = await gget(ACTIVE_USER_KEY);
-      setUsers(u);
-      if (u.length === 0) { setScreen("login"); setLoginMode("signup"); return; }
-      if (aid) {
-        const found = u.find(x => x.id === aid);
-        if (found) { await loadUser(found, u); return; }
-      }
-      setScreen("login"); setLoginMode("signin");
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) { await loadUser(session.user); }
+      else { setScreen("login"); }
     })();
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const loadUser = async (user, userList) => {
-    const uid = user.id;
-    const pr = await gget(sk(uid,"presets")) || [makePreset("My Rig")];
-    const ap = await gget(sk(uid,"activePreset")) || pr[0]?.id;
-    const se = await gget(sk(uid,"sessions")) || [];
-    const pa = await gget(sk(uid,"palette")) || { completed:[], flavorMap:{} };
-    const id = await gget(sk(uid,"identity")) || { traits:[], vocabulary:[], orders:[], log:[] };
-    const rd = await gget(sk(uid,"rate")) || { beans:[], gear:[] };
-    const dl = await gget(sk(uid,"discovery")) || "adventurous";
-    const dts = await gget(sk(uid,"discoveryTooltipSeen")) || false;
+  const loadUser = async (authUser) => {
+    const uid = authUser.id;
+    const prof = await gget(uid, "profile") || { name: authUser.email.split("@")[0], identityEnabled: true };
+    const pr = await gget(uid, "presets") || [makePreset("My Rig")];
+    const ap = await gget(uid, "activePreset") || pr[0]?.id;
+    const se = await gget(uid, "sessions") || [];
+    const pa = await gget(uid, "palette") || { completed:[], flavorMap:{} };
+    const id = await gget(uid, "identity") || { traits:[], vocabulary:[], orders:[], log:[] };
+    const rd = await gget(uid, "rate") || { beans:[], gear:[] };
+    const dl = await gget(uid, "discovery") || "adventurous";
+    const dts = await gget(uid, "discoveryTooltipSeen") || false;
     setPresets(pr); setActivePresetId(ap); setSessions(se); setPalette(pa); setIdentity(id); setRateData(rd);
-    setDiscoveryLevel(dl);
-    setDiscoveryTooltipSeen(dts);
+    setDiscoveryLevel(dl); setDiscoveryTooltipSeen(dts);
     if (!dts) setShowDiscoveryTooltip(true);
-    setActiveUser(user);
-    await gset(ACTIVE_USER_KEY, user.id);
+    setActiveUser({ id: authUser.id, email: authUser.email, name: prof.name, identityEnabled: prof.identityEnabled });
     setScreen("app"); setTab("dial");
     setDialHistory([]); setTrainHistory([]); setScoutHistory([]); setTrainMode("home");
   };
 
   // ── User management ──
   const createUser = async () => {
-    setCreateError("");
+    setCreateError(""); setSignUpMessage("");
     if (!newName.trim()) return setCreateError("Enter your name");
     if (!newEmail.trim() || !newEmail.includes("@")) return setCreateError("Enter a valid email");
     if (newPassword.length < 6) return setCreateError("Password must be at least 6 characters");
     if (newPassword !== newPassword2) return setCreateError("Passwords don't match");
-    if (users.find(u => u.email?.toLowerCase() === newEmail.trim().toLowerCase())) return setCreateError("An account with this email already exists");
-    const passwordHash = await hashPassword(newPassword);
-    const u = makeUser(newName.trim(), newEmail.trim().toLowerCase(), passwordHash);
-    const updated = [...users, u];
-    await gset(USERS_KEY, updated);
-    setUsers(updated);
+    const { data, error } = await supabase.auth.signUp({
+      email: newEmail.trim().toLowerCase(),
+      password: newPassword,
+    });
+    if (error) return setCreateError(error.message);
+    if (data.user) {
+      await gset(data.user.id, "profile", { name: newName.trim(), identityEnabled: true });
+    }
     setNewName(""); setNewEmail(""); setNewPassword(""); setNewPassword2("");
-    await loadUser(u, updated);
+    if (data.user && !data.session) {
+      setSignUpMessage("Account created! Check your email to confirm, then sign in.");
+      setLoginMode("signin");
+    }
+    // If session exists, onAuthStateChange fires → loadUser automatically
   };
 
   const signIn = async () => {
     setLoginError("");
     if (!loginEmail.trim()) return setLoginError("Enter your email");
-    const found = users.find(u => u.email?.toLowerCase() === loginEmail.trim().toLowerCase());
-    if (!found) return setLoginError("No account found with this email");
-    const hash = await hashPassword(loginPassword);
-    if (hash === found.passwordHash) {
-      setLoginEmail(""); setLoginPassword("");
-      await loadUser(found, users);
-    } else {
-      setLoginError("Incorrect password");
-    }
+    if (!loginPassword) return setLoginError("Enter your password");
+    const { error } = await supabase.auth.signInWithPassword({
+      email: loginEmail.trim().toLowerCase(),
+      password: loginPassword,
+    });
+    if (error) return setLoginError("Incorrect email or password");
+    setLoginEmail(""); setLoginPassword("");
+    // onAuthStateChange fires → loadUser automatically
   };
 
-  const switchUser = () => {
-    setActiveUser(null); setScreen("login"); setLoginMode("signin");
-    setLoginEmail(""); setLoginPassword(""); setLoginError("");
+  const forgotPassword = async () => {
+    setForgotError("");
+    if (!forgotEmail.trim() || !forgotEmail.includes("@")) return setForgotError("Enter a valid email");
+    const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail.trim().toLowerCase(), {
+      redirectTo: window.location.origin,
+    });
+    if (error) return setForgotError(error.message);
+    setForgotSent(true);
   };
 
-  const deleteUser = async (uid) => {
-    const updated = users.filter(u => u.id !== uid);
-    await gset(USERS_KEY, updated);
-    setUsers(updated);
-    if (updated.length === 0) { setLoginMode("signup"); }
+  const doResetPassword = async () => {
+    setResetError("");
+    if (resetPass.length < 6) return setResetError("Password must be at least 6 characters");
+    if (resetPass !== resetPass2) return setResetError("Passwords don't match");
+    const { error } = await supabase.auth.updateUser({ password: resetPass });
+    if (error) return setResetError(error.message);
+    setResetDone(true);
+    setResetPass(""); setResetPass2("");
+    setTimeout(async () => { await supabase.auth.signOut(); setScreen("login"); setLoginMode("signin"); }, 2000);
   };
+
+  const switchUser = async () => { await supabase.auth.signOut(); };
 
   // ── Per-user saves ──
   const uid = activeUser?.id;
-  const savePresets = async (p, aid) => { setPresets(p); await gset(sk(uid,"presets"),p); if(aid!==undefined){setActivePresetId(aid);await gset(sk(uid,"activePreset"),aid);} };
+  const savePresets = async (p, aid) => { setPresets(p); await gset(uid,"presets",p); if(aid!==undefined){setActivePresetId(aid);await gset(uid,"activePreset",aid);} };
   const saveProfile = async (fields) => { const up = presets.map(p => p.id===profile.id ? {...p,...fields} : p); await savePresets(up); };
-  const saveSessions = async (s) => { setSessions(s); await gset(sk(uid,"sessions"),s); };
-  const savePalette = async (p) => { setPalette(p); await gset(sk(uid,"palette"),p); };
-  const saveIdentity = async (id) => { setIdentity(id); await gset(sk(uid,"identity"),id); };
-  const saveRateData = async (rd) => { setRateData(rd); await gset(sk(uid,"rate"), rd); };
+  const saveSessions = async (s) => { setSessions(s); await gset(uid,"sessions",s); };
+  const savePalette = async (p) => { setPalette(p); await gset(uid,"palette",p); };
+  const saveIdentity = async (id) => { setIdentity(id); await gset(uid,"identity",id); };
+  const saveRateData = async (rd) => { setRateData(rd); await gset(uid,"rate",rd); };
   const saveDiscoveryLevel = async (level) => {
     setDiscoveryLevel(level);
-    await gset(sk(uid,"discovery"), level);
+    await gset(uid,"discovery",level);
   };
   const markDiscoveryTooltipSeen = async () => {
     setDiscoveryTooltipSeen(true);
     setShowDiscoveryTooltip(false);
-    await gset(sk(uid,"discoveryTooltipSeen"), true);
+    await gset(uid,"discoveryTooltipSeen",true);
   };
 
   const addRateItem = async (type, item) => {
@@ -395,9 +412,9 @@ export default function App() {
   };
 
   const toggleIdentity = async () => {
-    const updated = users.map(u => u.id===uid ? {...u,identityEnabled:!u.identityEnabled} : u);
-    setUsers(updated); await gset(USERS_KEY,updated);
-    setActiveUser(prev => ({...prev,identityEnabled:!prev.identityEnabled}));
+    const newEnabled = !activeUser?.identityEnabled;
+    setActiveUser(prev => ({...prev, identityEnabled: newEnabled}));
+    await gset(uid, "profile", { name: activeUser?.name, identityEnabled: newEnabled });
   };
 
   const profile = presets.find(p => p.id===activePresetId) || presets[0] || makePreset();
@@ -651,24 +668,27 @@ RULES:
             </div>
             <div style={{fontSize:14,color:C.muted,fontStyle:"italic",marginBottom:24}}>Sign in to your account</div>
 
+            {signUpMessage && <div style={{color:C.green,fontSize:13,marginBottom:14,fontFamily:"Courier New",lineHeight:1.5}}>{signUpMessage}</div>}
+
             <div style={{marginBottom:12}}>
               <label style={S.label}>Email</label>
-              <input
-                style={S.input} type="email" placeholder="you@email.com"
+              <input style={S.input} type="email" placeholder="you@email.com"
                 value={loginEmail} onChange={e=>setLoginEmail(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&signIn()} autoComplete="email"
-              />
+                onKeyDown={e=>e.key==="Enter"&&signIn()} autoComplete="email"/>
             </div>
-            <div style={{marginBottom:16,position:"relative"}}>
+            <div style={{marginBottom:6,position:"relative"}}>
               <label style={S.label}>Password</label>
-              <input
-                style={{...S.input,paddingRight:52}} type={showLoginPass?"text":"password"}
+              <input style={{...S.input,paddingRight:52}} type={showLoginPass?"text":"password"}
                 placeholder="••••••••" value={loginPassword}
                 onChange={e=>setLoginPassword(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&signIn()} autoComplete="current-password"
-              />
+                onKeyDown={e=>e.key==="Enter"&&signIn()} autoComplete="current-password"/>
               <button onClick={()=>setShowLoginPass(p=>!p)} style={{position:"absolute",right:10,bottom:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:11,fontFamily:"Courier New",letterSpacing:1}}>
                 {showLoginPass?"HIDE":"SHOW"}
+              </button>
+            </div>
+            <div style={{textAlign:"right",marginBottom:16}}>
+              <button onClick={()=>{setLoginMode("forgot");setLoginError("");setForgotSent(false);setForgotEmail("");}} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:12,fontFamily:"Courier New",letterSpacing:1,padding:0}}>
+                Forgot password?
               </button>
             </div>
 
@@ -677,7 +697,7 @@ RULES:
 
             <div style={{textAlign:"center",marginTop:20,fontSize:14,color:C.muted}}>
               Don't have an account?{" "}
-              <button onClick={()=>{setLoginMode("signup");setLoginError("");}} style={{background:"none",border:"none",color:C.gold,cursor:"pointer",fontSize:14,fontFamily:"'Crimson Pro',Georgia,serif",textDecoration:"underline",padding:0}}>
+              <button onClick={()=>{setLoginMode("signup");setLoginError("");setSignUpMessage("");}} style={{background:"none",border:"none",color:C.gold,cursor:"pointer",fontSize:14,fontFamily:"'Crimson Pro',Georgia,serif",textDecoration:"underline",padding:0}}>
                 Sign up
               </button>
             </div>
@@ -700,38 +720,101 @@ RULES:
             </div>
             <div style={{marginBottom:12,position:"relative"}}>
               <label style={S.label}>Password</label>
-              <input
-                style={{...S.input,paddingRight:52}} type={showSignupPass?"text":"password"}
+              <input style={{...S.input,paddingRight:52}} type={showSignupPass?"text":"password"}
                 placeholder="Min 6 characters" value={newPassword}
-                onChange={e=>setNewPassword(e.target.value)} autoComplete="new-password"
-              />
+                onChange={e=>setNewPassword(e.target.value)} autoComplete="new-password"/>
               <button onClick={()=>setShowSignupPass(p=>!p)} style={{position:"absolute",right:10,bottom:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:11,fontFamily:"Courier New",letterSpacing:1}}>
                 {showSignupPass?"HIDE":"SHOW"}
               </button>
             </div>
             <div style={{marginBottom:16}}>
               <label style={S.label}>Confirm password</label>
-              <input
-                style={S.input} type="password" placeholder="••••••••"
+              <input style={S.input} type="password" placeholder="••••••••"
                 value={newPassword2} onChange={e=>setNewPassword2(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&createUser()} autoComplete="new-password"
-              />
+                onKeyDown={e=>e.key==="Enter"&&createUser()} autoComplete="new-password"/>
             </div>
 
             {createError && <div style={{color:"#e07070",fontSize:13,marginBottom:12,fontFamily:"Courier New"}}>{createError}</div>}
             <button style={S.btn()} onClick={createUser}>Start My Journey →</button>
 
-            {users.length>0 && (
-              <div style={{textAlign:"center",marginTop:20,fontSize:14,color:C.muted}}>
-                Already have an account?{" "}
-                <button onClick={()=>{setLoginMode("signin");setCreateError("");}} style={{background:"none",border:"none",color:C.gold,cursor:"pointer",fontSize:14,fontFamily:"'Crimson Pro',Georgia,serif",textDecoration:"underline",padding:0}}>
-                  Sign in
-                </button>
-              </div>
-            )}
+            <div style={{textAlign:"center",marginTop:20,fontSize:14,color:C.muted}}>
+              Already have an account?{" "}
+              <button onClick={()=>{setLoginMode("signin");setCreateError("");}} style={{background:"none",border:"none",color:C.gold,cursor:"pointer",fontSize:14,fontFamily:"'Crimson Pro',Georgia,serif",textDecoration:"underline",padding:0}}>
+                Sign in
+              </button>
+            </div>
           </div>
         )}
 
+        {/* ── Forgot Password ── */}
+        {loginMode==="forgot" && (
+          <div style={{width:"100%",maxWidth:320,animation:"fadeUp 0.3s ease"}}>
+            <div style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:2}}>Reset password</div>
+            <div style={{fontSize:14,color:C.muted,fontStyle:"italic",marginBottom:24}}>We'll email you a reset link</div>
+
+            {!forgotSent ? (
+              <>
+                <div style={{marginBottom:16}}>
+                  <label style={S.label}>Your email</label>
+                  <input style={S.input} type="email" placeholder="you@email.com"
+                    value={forgotEmail} onChange={e=>setForgotEmail(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&forgotPassword()} autoComplete="email"/>
+                </div>
+                {forgotError && <div style={{color:"#e07070",fontSize:13,marginBottom:12,fontFamily:"Courier New"}}>{forgotError}</div>}
+                <button style={S.btn()} onClick={forgotPassword}>Send Reset Link →</button>
+              </>
+            ) : (
+              <div style={{...S.card,textAlign:"center",padding:24}}>
+                <div style={{fontSize:28,marginBottom:10}}>📬</div>
+                <div style={{fontSize:15,color:C.text,lineHeight:1.7}}>Check your inbox.<br/>Click the link to set a new password.</div>
+              </div>
+            )}
+
+            <div style={{textAlign:"center",marginTop:20}}>
+              <button onClick={()=>{setLoginMode("signin");setForgotSent(false);setForgotEmail("");}} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13,fontFamily:"Courier New",letterSpacing:1}}>
+                ← Back to sign in
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </>
+  );
+
+  // ── Reset Password screen (after clicking email link) ──
+  if (screen==="reset") return (
+    <>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&display=swap'); @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}} *{box-sizing:border-box}`}</style>
+      <Grain/>
+      <div style={{...S.app,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <img src={LOGO_URI} alt="Coffee G" style={{height:72,objectFit:"contain",marginBottom:10,filter:"brightness(0.9)"}}/>
+        </div>
+        <div style={{width:"100%",maxWidth:320,animation:"fadeUp 0.3s ease"}}>
+          {!resetDone ? (
+            <>
+              <div style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:2}}>New password</div>
+              <div style={{fontSize:14,color:C.muted,fontStyle:"italic",marginBottom:24}}>Choose a new password for your account</div>
+              <div style={{marginBottom:12}}>
+                <label style={S.label}>New password</label>
+                <input style={S.input} type="password" placeholder="Min 6 characters" value={resetPass} onChange={e=>setResetPass(e.target.value)} autoComplete="new-password"/>
+              </div>
+              <div style={{marginBottom:16}}>
+                <label style={S.label}>Confirm password</label>
+                <input style={S.input} type="password" placeholder="••••••••" value={resetPass2} onChange={e=>setResetPass2(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doResetPassword()} autoComplete="new-password"/>
+              </div>
+              {resetError && <div style={{color:"#e07070",fontSize:13,marginBottom:12,fontFamily:"Courier New"}}>{resetError}</div>}
+              <button style={S.btn()} onClick={doResetPassword}>Update Password →</button>
+            </>
+          ) : (
+            <div style={{...S.card,textAlign:"center",padding:32}}>
+              <div style={{fontSize:32,marginBottom:10}}>✓</div>
+              <div style={{fontSize:16,color:C.text}}>Password updated!</div>
+              <div style={{fontSize:13,color:C.muted,marginTop:6,fontStyle:"italic"}}>Redirecting to sign in…</div>
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
@@ -1322,9 +1405,8 @@ RULES:
             <div style={{textAlign:"center",fontSize:11,color:"rgba(196,146,58,0.4)",marginTop:8,fontFamily:"Courier New"}}>✓ changes save automatically</div>
 
             {/* Switch / add user */}
-            <div style={{...S.row,marginTop:16,gap:10}}>
-              <button style={{...S.ghostBtn,flex:1}} onClick={switchUser}>Sign Out</button>
-              <button style={{...S.ghostBtn,flex:1}} onClick={()=>{switchUser();setTimeout(()=>setLoginMode("signup"),100);}}>+ New Account</button>
+            <div style={{marginTop:16}}>
+              <button style={{...S.ghostBtn,width:"100%"}} onClick={switchUser}>Sign Out</button>
             </div>
 
             {/* About */}
