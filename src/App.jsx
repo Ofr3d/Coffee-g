@@ -14,9 +14,14 @@ const ACTIVE_USER_KEY = "coffeeg:activeUser";
 const FIRST_LAUNCH_KEY = "coffeeg:firstLaunch";
 const RATE_KEY = "coffeeg:rate";
 
-const makeUser = (name, pin) => ({
+const hashPassword = async (pw) => {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+};
+
+const makeUser = (name, email, passwordHash) => ({
   id: Math.random().toString(36).slice(2),
-  name, pin,
+  name, email, passwordHash,
   identityEnabled: true,
   createdAt: Date.now(),
 });
@@ -212,13 +217,16 @@ export default function App() {
   const [activeUser, setActiveUser] = useState(null);
   const [screen, setScreen] = useState("loading"); // loading | intro | login | app
   const [showIntro, setShowIntro] = useState(false);
-  const [loginMode, setLoginMode] = useState("pick"); // pick | create | pin
-  const [pendingUser, setPendingUser] = useState(null);
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState("");
+  const [loginMode, setLoginMode] = useState("signin"); // signin | signup
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [showLoginPass, setShowLoginPass] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newPin, setNewPin] = useState("");
-  const [newPin2, setNewPin2] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPassword2, setNewPassword2] = useState("");
+  const [showSignupPass, setShowSignupPass] = useState(false);
   const [createError, setCreateError] = useState("");
 
   // App state (per-user, loaded on login)
@@ -278,15 +286,21 @@ export default function App() {
     (async () => {
       const fl = await gget(FIRST_LAUNCH_KEY);
       if (!fl) { await gset(FIRST_LAUNCH_KEY, true); setShowIntro(true); }
-      const u = await gget(USERS_KEY) || [];
+      let u = await gget(USERS_KEY) || [];
+      // Migrate: drop any legacy PIN-only users (no email) that can't sign in
+      const validUsers = u.filter(x => x.email && x.passwordHash);
+      if (validUsers.length !== u.length) {
+        await gset(USERS_KEY, validUsers);
+        u = validUsers;
+      }
       const aid = await gget(ACTIVE_USER_KEY);
       setUsers(u);
-      if (u.length === 0) { setScreen("login"); setLoginMode("create"); return; }
+      if (u.length === 0) { setScreen("login"); setLoginMode("signup"); return; }
       if (aid) {
         const found = u.find(x => x.id === aid);
         if (found) { await loadUser(found, u); return; }
       }
-      setScreen("login"); setLoginMode("pick");
+      setScreen("login"); setLoginMode("signin");
     })();
   }, []);
 
@@ -313,36 +327,44 @@ export default function App() {
   // ── User management ──
   const createUser = async () => {
     setCreateError("");
-    if (!newName.trim()) return setCreateError("Enter a name");
-    if (newPin.length < 4) return setCreateError("PIN must be 4 digits");
-    if (newPin !== newPin2) return setCreateError("PINs don't match");
-    const u = makeUser(newName.trim(), newPin);
+    if (!newName.trim()) return setCreateError("Enter your name");
+    if (!newEmail.trim() || !newEmail.includes("@")) return setCreateError("Enter a valid email");
+    if (newPassword.length < 6) return setCreateError("Password must be at least 6 characters");
+    if (newPassword !== newPassword2) return setCreateError("Passwords don't match");
+    if (users.find(u => u.email?.toLowerCase() === newEmail.trim().toLowerCase())) return setCreateError("An account with this email already exists");
+    const passwordHash = await hashPassword(newPassword);
+    const u = makeUser(newName.trim(), newEmail.trim().toLowerCase(), passwordHash);
     const updated = [...users, u];
     await gset(USERS_KEY, updated);
     setUsers(updated);
-    setNewName(""); setNewPin(""); setNewPin2("");
+    setNewName(""); setNewEmail(""); setNewPassword(""); setNewPassword2("");
     await loadUser(u, updated);
   };
 
-  const attemptLogin = async () => {
-    if (pinInput === pendingUser.pin) {
-      setPinInput(""); setPinError("");
-      await loadUser(pendingUser, users);
+  const signIn = async () => {
+    setLoginError("");
+    if (!loginEmail.trim()) return setLoginError("Enter your email");
+    const found = users.find(u => u.email?.toLowerCase() === loginEmail.trim().toLowerCase());
+    if (!found) return setLoginError("No account found with this email");
+    const hash = await hashPassword(loginPassword);
+    if (hash === found.passwordHash) {
+      setLoginEmail(""); setLoginPassword("");
+      await loadUser(found, users);
     } else {
-      setPinError("Wrong PIN"); setPinInput("");
+      setLoginError("Incorrect password");
     }
   };
 
   const switchUser = () => {
-    setActiveUser(null); setScreen("login"); setLoginMode("pick");
-    setPinInput(""); setPendingUser(null);
+    setActiveUser(null); setScreen("login"); setLoginMode("signin");
+    setLoginEmail(""); setLoginPassword(""); setLoginError("");
   };
 
   const deleteUser = async (uid) => {
     const updated = users.filter(u => u.id !== uid);
     await gset(USERS_KEY, updated);
     setUsers(updated);
-    if (updated.length === 0) { setLoginMode("create"); }
+    if (updated.length === 0) { setLoginMode("signup"); }
   };
 
   // ── Per-user saves ──
@@ -614,78 +636,102 @@ RULES:
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,600;0,700;1,400&display=swap'); @keyframes steam{0%,100%{opacity:0;transform:translateY(0)}50%{opacity:1;transform:translateY(-10px)}} @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}} *{box-sizing:border-box}`}</style>
       <Grain/>
       <div style={{...S.app,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24}}>
-        <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{fontSize:9,letterSpacing:6,color:C.gold,fontFamily:"Courier New",marginBottom:6}}>☕ Coffee G</div>
-          <div style={{fontSize:32,fontWeight:700,color:C.text}}>Welcome back<span style={{display:"inline-flex",marginLeft:8,verticalAlign:"bottom"}}><Steam delay={0}/><Steam delay={0.3}/><Steam delay={0.6}/></span></div>
-          <div style={{fontSize:14,color:C.muted,fontStyle:"italic",marginTop:4}}>your personal coffee ji</div>
+
+        {/* Logo */}
+        <div style={{textAlign:"center",marginBottom:28,animation:"fadeUp 0.5s ease"}}>
+          <img src={LOGO_URI} alt="Coffee G" style={{height:72,objectFit:"contain",marginBottom:10,filter:"brightness(0.9)"}}/>
+          <div style={{fontSize:9,letterSpacing:6,color:C.gold,fontFamily:"Courier New"}}>☕ COFFEE G</div>
         </div>
 
-        {loginMode==="pick" && (
-          <div style={{width:"100%",maxWidth:340}}>
-            <div style={{...S.label,marginBottom:12}}>Who's brewing?</div>
-            {users.map(u => (
-              <div key={u.id} style={{...S.card,display:"flex",alignItems:"center",gap:12,cursor:"pointer",marginBottom:10}} onClick={()=>{setPendingUser(u);setLoginMode("pin");}}>
-                <div style={{width:38,height:38,borderRadius:"50%",background:`linear-gradient(135deg,${C.gold},#a0721e)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:"#180d06",flexShrink:0}}>{u.name[0].toUpperCase()}</div>
-                <div style={{flex:1,fontSize:16,color:C.text}}>{u.name}</div>
-                <div style={{color:C.muted,fontSize:18}}>›</div>
-              </div>
-            ))}
-            <button style={{...S.btn(),marginTop:8}} onClick={()=>setLoginMode("create")}>+ New Profile</button>
+        {/* ── Sign In ── */}
+        {loginMode==="signin" && (
+          <div style={{width:"100%",maxWidth:320,animation:"fadeUp 0.3s ease"}}>
+            <div style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:2}}>
+              Welcome back<span style={{display:"inline-flex",marginLeft:8,verticalAlign:"bottom"}}><Steam delay={0}/><Steam delay={0.3}/></span>
+            </div>
+            <div style={{fontSize:14,color:C.muted,fontStyle:"italic",marginBottom:24}}>Sign in to your account</div>
+
+            <div style={{marginBottom:12}}>
+              <label style={S.label}>Email</label>
+              <input
+                style={S.input} type="email" placeholder="you@email.com"
+                value={loginEmail} onChange={e=>setLoginEmail(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&signIn()} autoComplete="email"
+              />
+            </div>
+            <div style={{marginBottom:16,position:"relative"}}>
+              <label style={S.label}>Password</label>
+              <input
+                style={{...S.input,paddingRight:52}} type={showLoginPass?"text":"password"}
+                placeholder="••••••••" value={loginPassword}
+                onChange={e=>setLoginPassword(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&signIn()} autoComplete="current-password"
+              />
+              <button onClick={()=>setShowLoginPass(p=>!p)} style={{position:"absolute",right:10,bottom:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:11,fontFamily:"Courier New",letterSpacing:1}}>
+                {showLoginPass?"HIDE":"SHOW"}
+              </button>
+            </div>
+
+            {loginError && <div style={{color:"#e07070",fontSize:13,marginBottom:12,fontFamily:"Courier New"}}>{loginError}</div>}
+            <button style={S.btn()} onClick={signIn}>Sign In →</button>
+
+            <div style={{textAlign:"center",marginTop:20,fontSize:14,color:C.muted}}>
+              Don't have an account?{" "}
+              <button onClick={()=>{setLoginMode("signup");setLoginError("");}} style={{background:"none",border:"none",color:C.gold,cursor:"pointer",fontSize:14,fontFamily:"'Crimson Pro',Georgia,serif",textDecoration:"underline",padding:0}}>
+                Sign up
+              </button>
+            </div>
           </div>
         )}
 
-        {loginMode==="pin" && pendingUser && (
-          <div style={{width:"100%",maxWidth:300,textAlign:"center"}}>
-            <div style={{width:56,height:56,borderRadius:"50%",background:`linear-gradient(135deg,${C.gold},#a0721e)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24,fontWeight:700,color:"#180d06",margin:"0 auto 16px"}}>{pendingUser.name[0].toUpperCase()}</div>
-            <div style={{fontSize:20,color:C.text,marginBottom:4}}>{pendingUser.name}</div>
-            <div style={{fontSize:13,color:C.muted,marginBottom:20,fontStyle:"italic"}}>Enter your PIN</div>
-            <div style={{display:"flex",justifyContent:"center",gap:10,marginBottom:16}}>
-              {[0,1,2,3].map(i=>(
-                <div key={i} style={{width:14,height:14,borderRadius:"50%",background:i<pinInput.length?C.gold:`rgba(212,164,90,0.2)`,transition:"background 0.2s"}}/>
-              ))}
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,maxWidth:240,margin:"0 auto"}}>
-              {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((k,i)=>(
-                <button key={i} onClick={()=>{
-                  if(k==="⌫"){setPinInput(p=>p.slice(0,-1));setPinError("");}
-                  else if(k!==""&&pinInput.length<4){
-                    const next=pinInput+k;
-                    setPinInput(next);
-                    if(next.length===4){
-                      if(next===pendingUser.pin){setPinError("");loadUser(pendingUser,users);}
-                      else{setPinError("Wrong PIN");setTimeout(()=>setPinInput(""),300);}
-                    }
-                  }
-                }} style={{padding:"14px",background:k===""?"transparent":"rgba(255,255,255,0.05)",border:k===""?"none":`1px solid ${C.border}`,borderRadius:10,color:C.text,fontSize:18,cursor:k===""?"default":"pointer",fontFamily:"'Crimson Pro',Georgia,serif"}}>
-                  {k}
-                </button>
-              ))}
-            </div>
-            {pinError && <div style={{color:"#e07070",fontSize:13,marginTop:12,fontFamily:"Courier New"}}>{pinError}</div>}
-            <button onClick={()=>{setLoginMode("pick");setPinInput("");setPinError("");}} style={{...S.ghostBtn,marginTop:16}}>← Back</button>
-          </div>
-        )}
+        {/* ── Sign Up ── */}
+        {loginMode==="signup" && (
+          <div style={{width:"100%",maxWidth:320,animation:"fadeUp 0.3s ease"}}>
+            <div style={{fontSize:26,fontWeight:700,color:C.text,marginBottom:2}}>Create account</div>
+            <div style={{fontSize:14,color:C.muted,fontStyle:"italic",marginBottom:24}}>Your coffee journey starts here</div>
 
-        {loginMode==="create" && (
-          <div style={{width:"100%",maxWidth:320}}>
-            <div style={{...S.label,marginBottom:16}}>Create your profile</div>
             <div style={{marginBottom:12}}>
               <label style={S.label}>Your name</label>
-              <input style={S.input} placeholder="e.g. Ofer" value={newName} onChange={e=>setNewName(e.target.value)}/>
+              <input style={S.input} placeholder="e.g. Ofer" value={newName} onChange={e=>setNewName(e.target.value)} autoComplete="name"/>
             </div>
             <div style={{marginBottom:12}}>
-              <label style={S.label}>4-digit PIN</label>
-              <input style={S.input} type="password" inputMode="numeric" maxLength={4} placeholder="••••" value={newPin} onChange={e=>setNewPin(e.target.value.replace(/\D/g,"").slice(0,4))}/>
+              <label style={S.label}>Email</label>
+              <input style={S.input} type="email" placeholder="you@email.com" value={newEmail} onChange={e=>setNewEmail(e.target.value)} autoComplete="email"/>
+            </div>
+            <div style={{marginBottom:12,position:"relative"}}>
+              <label style={S.label}>Password</label>
+              <input
+                style={{...S.input,paddingRight:52}} type={showSignupPass?"text":"password"}
+                placeholder="Min 6 characters" value={newPassword}
+                onChange={e=>setNewPassword(e.target.value)} autoComplete="new-password"
+              />
+              <button onClick={()=>setShowSignupPass(p=>!p)} style={{position:"absolute",right:10,bottom:10,background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:11,fontFamily:"Courier New",letterSpacing:1}}>
+                {showSignupPass?"HIDE":"SHOW"}
+              </button>
             </div>
             <div style={{marginBottom:16}}>
-              <label style={S.label}>Confirm PIN</label>
-              <input style={S.input} type="password" inputMode="numeric" maxLength={4} placeholder="••••" value={newPin2} onChange={e=>setNewPin2(e.target.value.replace(/\D/g,"").slice(0,4))}/>
+              <label style={S.label}>Confirm password</label>
+              <input
+                style={S.input} type="password" placeholder="••••••••"
+                value={newPassword2} onChange={e=>setNewPassword2(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&createUser()} autoComplete="new-password"
+              />
             </div>
-            {createError && <div style={{color:"#e07070",fontSize:13,marginBottom:10,fontFamily:"Courier New"}}>{createError}</div>}
+
+            {createError && <div style={{color:"#e07070",fontSize:13,marginBottom:12,fontFamily:"Courier New"}}>{createError}</div>}
             <button style={S.btn()} onClick={createUser}>Start My Journey →</button>
-            {users.length>0 && <button onClick={()=>setLoginMode("pick")} style={{...S.ghostBtn,width:"100%",marginTop:10}}>← Back</button>}
+
+            {users.length>0 && (
+              <div style={{textAlign:"center",marginTop:20,fontSize:14,color:C.muted}}>
+                Already have an account?{" "}
+                <button onClick={()=>{setLoginMode("signin");setCreateError("");}} style={{background:"none",border:"none",color:C.gold,cursor:"pointer",fontSize:14,fontFamily:"'Crimson Pro',Georgia,serif",textDecoration:"underline",padding:0}}>
+                  Sign in
+                </button>
+              </div>
+            )}
           </div>
         )}
+
       </div>
     </>
   );
@@ -1277,8 +1323,8 @@ RULES:
 
             {/* Switch / add user */}
             <div style={{...S.row,marginTop:16,gap:10}}>
-              <button style={{...S.ghostBtn,flex:1}} onClick={switchUser}>Switch User</button>
-              <button style={{...S.ghostBtn,flex:1}} onClick={()=>{switchUser();setTimeout(()=>setLoginMode("create"),100);}}>+ New User</button>
+              <button style={{...S.ghostBtn,flex:1}} onClick={switchUser}>Sign Out</button>
+              <button style={{...S.ghostBtn,flex:1}} onClick={()=>{switchUser();setTimeout(()=>setLoginMode("signup"),100);}}>+ New Account</button>
             </div>
 
             {/* About */}
