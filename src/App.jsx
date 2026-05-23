@@ -297,6 +297,9 @@ export default function App() {
     const se = await gget(sk(uid,"sessions")) || [];
     const pa = await gget(sk(uid,"palette")) || { completed:[], flavorMap:{} };
     const id = await gget(sk(uid,"identity")) || { traits:[], vocabulary:[], orders:[], log:[] };
+    const rd = await gget(sk(uid,"rate")) || { beans:[], gear:[] };
+    const dl = await gget(sk(uid,"discovery")) || "adventurous";
+    const dts = await gget(sk(uid,"discoveryTooltipSeen")) || false;
     setPresets(pr); setActivePresetId(ap); setSessions(se); setPalette(pa); setIdentity(id); setRateData(rd);
     setDiscoveryLevel(dl);
     setDiscoveryTooltipSeen(dts);
