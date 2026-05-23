@@ -412,6 +412,7 @@ export default function App() {
     const recent = sessions.slice(-5).map((s,i)=>`#${i+1}(${s.method}) dose=${s.dose}g yield=${s.yield}g time=${s.time}s grind=${s.grindSize} rating=${s.rating}/5 taste=[${s.taste?.join(",")}]`).join("\n");
     const palateLevel = palette.completed.length;
     const idSummary = identity.traits?.join(", ") || "not yet built";
+    const discoveryDesc = { conservative:"conservative — stay close to what works", adventurous:"adventurous — open to new suggestions", funky:"funky — try anything" }[discoveryLevel] || discoveryLevel;
     return `You are Dial — an elite specialty coffee dialing-in expert and personal barista mentor. Calm, precise, knowledgeable.
 
 USER: ${activeUser?.name}
