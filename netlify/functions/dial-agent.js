@@ -1,10 +1,14 @@
-export default async (req) => {
-  const { session, tasteIdentity, recentSessions } = await req.json();
-
-  const apiKey = process.env.LLM_API_KEY;
-  if (!apiKey) {
-    return new Response(JSON.stringify({ suggestion: null }), { status: 200 });
+exports.handler = async (event) => {
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: 'Method Not Allowed' };
   }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return { statusCode: 200, body: JSON.stringify({ suggestion: null }) };
+  }
+
+  const { session, tasteIdentity, recentSessions } = JSON.parse(event.body);
 
   const outcomeDescriptions = {
     sour:       'underextracted — acids extracted, sugars not fully dissolved',
@@ -16,8 +20,8 @@ export default async (req) => {
     balanced:   'well-extracted — hit the sweet spot',
   };
 
-  const recentOutcomes = recentSessions.slice(0, 5).map(s => s.outcome).join(', ');
-  const identitySummary = Object.entries(tasteIdentity)
+  const recentOutcomes = (recentSessions || []).slice(0, 5).map(s => s.outcome).join(', ');
+  const identitySummary = Object.entries(tasteIdentity || {})
     .sort((a, b) => b[1] - a[1])
     .map(([k, v]) => `${k} (${v}x)`)
     .join(', ');
@@ -37,17 +41,28 @@ User history: recent outcomes — ${recentOutcomes || 'first brew'}
 Taste pattern: ${identitySummary || 'no history yet'}`;
 
   try {
-    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=' + apiKey, {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 150,
+        messages: [{ role: 'user', content: prompt }],
+      }),
     });
-    const data = await res.json();
-    const suggestion = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-    return new Response(JSON.stringify({ suggestion }), { status: 200 });
-  } catch {
-    return new Response(JSON.stringify({ suggestion: null }), { status: 200 });
+
+    const data = await response.json();
+    const suggestion = data?.content?.[0]?.text?.trim() || null;
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestion }),
+    };
+  } catch (err) {
+    return { statusCode: 200, body: JSON.stringify({ suggestion: null }) };
   }
 };
-
-export const config = { path: '/.netlify/functions/dial-agent' };
