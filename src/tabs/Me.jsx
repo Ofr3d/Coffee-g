@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { updateProfile, hashPin, getSessions } from '../lib/storage';
+import { updateProfile, hashPin, getSessions, deleteProfile, getProfiles } from '../lib/storage';
 
 const DISCOVERY_LEVELS = [
   { id: 'conservative', label: 'Conservative', desc: 'Only what closely matches your taste' },
@@ -216,6 +216,30 @@ export default function Me({ profile, onUpdate, onSwitch }) {
       >
         Switch profile
       </button>
+
+      {/* Delete profile — only shown when more than one exists */}
+      {getProfiles().length > 1 && (
+        <button
+          onClick={() => {
+            if (window.confirm(`Delete profile "${profile?.name}"? This cannot be undone.`)) {
+              deleteProfile(profile?.id);
+              onSwitch();
+            }
+          }}
+          style={{
+            width: '100%',
+            marginTop: 8,
+            padding: '13px 0',
+            borderRadius: 12,
+            border: '1px solid var(--red)',
+            background: 'transparent',
+            color: 'var(--red)',
+            fontSize: 14,
+          }}
+        >
+          Delete this profile
+        </button>
+      )}
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { createProfile, hashPin } from '../lib/storage';
+import { createProfile, hashPin, getProfiles } from '../lib/storage';
 
-export default function SetupScreen({ onDone }) {
+export default function SetupScreen({ onDone, onBack }) {
+  const hasExisting = getProfiles().length > 0;
   const [name, setName]       = useState('');
   const [pin, setPin]         = useState('');
   const [pinConfirm, setPinConfirm] = useState('');
@@ -19,6 +20,11 @@ export default function SetupScreen({ onDone }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '40px 24px 32px', gap: 32 }}>
       <div>
+        {hasExisting && onBack && (
+          <button onClick={onBack} style={{ color: 'var(--accent)', fontSize: 15, marginBottom: 16, display: 'block' }}>
+            ‹ Back
+          </button>
+        )}
         <h1 style={{ fontSize: 28, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>Coffee G</h1>
         <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
           Your personal coffee companion. Let's set up your profile.

@@ -71,7 +71,7 @@ export default function App() {
   if (screen === 'loading') return null;
 
   if (screen === 'setup') {
-    return <SetupScreen onDone={handleSetupDone} />;
+    return <SetupScreen onDone={handleSetupDone} onBack={() => setScreen('pick')} />;
   }
 
   if (screen === 'pick') {
