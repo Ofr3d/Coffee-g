@@ -1,5 +1,22 @@
 # CLAUDE.md — Coffee G
 
+---
+
+## ⛔ STOP BEFORE EVERY ACTION
+
+**Answer these or do not proceed:**
+
+1. **What is the actual problem?** (observed evidence — not assumed)
+2. **Do I have the full picture?** (if no → get it first, do not act)
+3. **Is this the simplest solution?** (does it already exist? is there one change point instead of many?)
+4. **What breaks if my assumption is wrong?**
+
+If you cannot answer all four — **stop, ask, get the information. Do not guess. Do not ship a fix for an undiagnosed problem.**
+
+This is not optional. Violating this wastes the founder's time, money, and trust. There is no excuse.
+
+---
+
 > This file is auto-loaded by Claude Code. It orients you on the project. Deeper detail lives in the referenced docs — read them when the task touches their area.
 
 ## What this is
