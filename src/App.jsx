@@ -61,10 +61,20 @@ export default function App() {
 
   function handleSwitchProfile() {
     const profiles = getProfiles();
-    if (profiles.length > 1) {
-      setScreen('pick');
-    } else {
+    if (profiles.length === 0) {
       setScreen('setup');
+    } else if (profiles.length === 1) {
+      const p = profiles[0];
+      if (p.pin_hash) {
+        setProfile(p);
+        setScreen('pin');
+      } else {
+        setCurrentProfile(p.id);
+        setProfile(p);
+        setScreen('app');
+      }
+    } else {
+      setScreen('pick');
     }
   }
 
