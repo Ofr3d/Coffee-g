@@ -3,7 +3,7 @@ const TABS = [
   { id: 'beans',    label: 'Beans',    icon: '◉' },
   { id: 'brew',     label: 'Brew',     icon: '◎' },
   { id: 'train',    label: 'Train',    icon: '◈' },
-  { id: 'me',       label: 'Me',       icon: '◑' },
+  { id: 'me',       label: 'Profile',  icon: '◑' },
 ];
 
 export default function TabBar({ active, onChange }) {
