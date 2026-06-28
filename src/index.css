@@ -6,17 +6,18 @@
 }
 
 :root {
-  --bg:         #1a1008;
-  --surface:    #241608;
-  --surface-2:  #2e1e0a;
-  --border:     #3a280f;
-  --text:       #f0e6d3;
-  --text-muted: #8a7560;
-  --accent:     #c8843a;
-  --accent-warm:#e09a50;
-  --green:      #5a9e6f;
-  --amber:      #c8a83a;
-  --red:        #c85a3a;
+  /* Light/warm system — see art/ design board (Porcelain·Linen·Almond·Terracotta·Espresso) */
+  --bg:         #ece3d6;  /* Linen — recessive app canvas */
+  --surface:    #fbf8f4;  /* Porcelain — raised cards/surfaces */
+  --surface-2:  #f3ece2;  /* Cream wash — inputs, chips, insets */
+  --border:     #e2d8c9;  /* hairline warm border */
+  --text:       #2b2623;  /* Espresso — body text */
+  --text-muted: #6b5e50;  /* Mocha — secondary text */
+  --accent:     #c2683c;  /* Terracotta — single primary accent */
+  --accent-warm:#e07a45;  /* Terracotta light */
+  --green:      #4e8c5f;  /* coach confidence — tuned for legibility on cream */
+  --amber:      #b07a1e;
+  --red:        #b5482c;
   --tab-h:      60px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -49,7 +50,7 @@ input, textarea, select {
   color: inherit;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 10px 12px;
   width: 100%;
   outline: none;

@@ -1,68 +1,52 @@
-exports.handler = async (event) => {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+// Thin transport shell for the coach. Its only jobs: guard the API key, call the
+// LLM, return the text. All coffee judgment lives in the shared engine (src/core/coach.js),
+// which is provider-agnostic — so swapping the LLM provider only touches THIS file.
+import { buildCoachMessages } from '../../src/core/coach.js';
+
+// The hard flaw-vs-preference call deserves the capable tier. Flip to 'gemini-2.5-flash'
+// for cost; a true cheap/premium router stays deferred until there's volume (see COMPASS).
+const MODEL = 'gemini-2.5-pro';
+const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+
+const ok   = (suggestion) => ({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suggestion }) });
+const fail = (statusCode) => ({ statusCode, body: JSON.stringify({ suggestion: null }) });
+
+export const handler = async (event) => {
+  if (event.httpMethod !== 'POST') return fail(405);
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return ok(null); // no key configured → degrade quietly, never crash
+
+  let payload;
+  try {
+    payload = JSON.parse(event.body || '{}');
+  } catch {
+    return fail(400);
   }
+  if (!payload.session) return ok(null);
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return { statusCode: 200, body: JSON.stringify({ suggestion: null }) };
-  }
-
-  const { session, tasteIdentity, recentSessions } = JSON.parse(event.body);
-
-  const outcomeDescriptions = {
-    sour:       'underextracted — acids extracted, sugars not fully dissolved',
-    bitter:     'overextracted — too many bitter compounds pulled',
-    weak:       'under-dosed or too coarse — not enough coffee or contact time',
-    strong:     'over-dosed or too fine — too much coffee or over-concentrated',
-    astringent: 'very overextracted or too hot — mouth-puckering dryness',
-    muddled:    'uneven extraction — inconsistent particle size or poor distribution',
-    balanced:   'well-extracted — hit the sweet spot',
-  };
-
-  const recentOutcomes = (recentSessions || []).slice(0, 5).map(s => s.outcome).join(', ');
-  const identitySummary = Object.entries(tasteIdentity || {})
-    .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => `${k} (${v}x)`)
-    .join(', ');
-
-  const prompt = `You are a precise, warm coffee dialing coach. Give ONE specific, actionable suggestion for the user's next brew. Be direct — name the exact adjustment (e.g. "grind 2 clicks finer", "drop to 91°C", "extend to 3:30"). No more than 2 sentences.
-
-Current brew:
-- Bean: ${session.bean || 'unknown'}
-- Method: ${session.method}
-- Dose: ${session.parameters.dose || '?'}g, Yield: ${session.parameters.yield || '?'}${session.method === 'Espresso' ? 'g' : 'ml'}, Time: ${session.parameters.time || '?'}
-- Grind: ${session.parameters.grind || '?'} on ${session.parameters.grind_device || 'unknown grinder'}
-- Temp: ${session.parameters.temp || '?'}°C
-- Outcome: ${session.outcome} — ${outcomeDescriptions[session.outcome] || ''}
-- Notes: ${session.notes || 'none'}
-
-User history: recent outcomes — ${recentOutcomes || 'first brew'}
-Taste pattern: ${identitySummary || 'no history yet'}`;
+  const { system, user } = buildCoachMessages(payload);
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(ENDPOINT, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 150,
-        messages: [{ role: 'user', content: prompt }],
+        system_instruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        // Headroom for 2.5's thinking tokens; the prompt itself keeps the answer to ~3 sentences.
+        generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
       }),
     });
 
     const data = await response.json();
-    const suggestion = data?.content?.[0]?.text?.trim() || null;
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ suggestion }),
-    };
-  } catch (err) {
-    return { statusCode: 200, body: JSON.stringify({ suggestion: null }) };
+    const text = data?.candidates?.[0]?.content?.parts
+      ?.map(p => p.text).filter(Boolean).join('').trim();
+    return ok(text || null); // blocked/empty candidate → quiet null, the UI handles it
+  } catch {
+    return ok(null); // network/LLM hiccup → quiet null
   }
 };

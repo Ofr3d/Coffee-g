@@ -153,21 +153,7 @@ export default function Brew({ profile, onSessionLogged }) {
     setSessions(next);
     onSessionLogged?.();
     setTip(OUTCOME_TIPS[outcome]);
-
-    if (navigator.onLine) {
-      setAgentLoading(true);
-      setAgentMsg(null);
-      try {
-        const res = await fetch('/.netlify/functions/dial-agent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session, tasteIdentity: profile?.taste_identity || {}, recentSessions: next.slice(0, 5) }),
-        });
-        const data = await res.json();
-        setAgentMsg(data.suggestion);
-      } catch { /* silent */ }
-      finally { setAgentLoading(false); }
-    }
+    // The coach is summoned, never pushed — no auto-fire here. See handleDialMeIn.
 
     // Reset form fields (keep method/vessel/grinder/temp)
     setBeanName(''); setBeanOrigin(''); setBeanFarm(''); setBeanProcess('');
@@ -176,6 +162,30 @@ export default function Brew({ profile, onSessionLogged }) {
     setApDose(''); setApWater(''); setSteepTime(''); setBypass('');
     setImDose(''); setImWater(''); setImTime('');
     setOutcome(null); setNotes('');
+  }
+
+  async function handleDialMeIn() {
+    if (!navigator.onLine) return;
+    const session = {
+      bean: { name: beanName, origin: beanOrigin, farm: beanFarm, process: beanProcess },
+      method,
+      vessel,
+      parameters: buildSessionParams(),
+      outcome,            // may be null — coach gives a pre-brew read
+      notes,
+    };
+    setAgentLoading(true);
+    setAgentMsg(null);
+    try {
+      const res = await fetch('/.netlify/functions/dial-agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session, tasteIdentity: profile?.taste_identity || {}, recentSessions: sessions.slice(0, 5) }),
+      });
+      const data = await res.json();
+      setAgentMsg(data.suggestion);
+    } catch { setAgentMsg(null); }
+    finally { setAgentLoading(false); }
   }
 
   function getTrend() {
@@ -218,19 +228,25 @@ export default function Brew({ profile, onSessionLogged }) {
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: '20px 16px 32px' }}>
 
-      {/* Tip + agent card */}
+      {/* Learning-loop tip (after a log) */}
       {tip && (
-        <div style={{ background: 'var(--surface-2)', border: '1px solid var(--accent)', borderRadius: 12, padding: '14px 16px', marginBottom: 20, position: 'relative' }}>
-          <button onClick={() => { setTip(null); setAgentMsg(null); }} style={{ position: 'absolute', top: 10, right: 12, color: 'var(--text-muted)', fontSize: 18 }}>×</button>
+        <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px', marginBottom: 16, position: 'relative' }}>
+          <button onClick={() => setTip(null)} style={{ position: 'absolute', top: 10, right: 12, color: 'var(--text-muted)', fontSize: 18 }}>×</button>
           <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4, paddingRight: 20 }}>{tip.headline}</div>
           <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6 }}>{tip.body}</p>
-          {agentLoading && <p style={{ fontSize: 13, color: 'var(--accent)', marginTop: 12 }}>Dialing in your next brew…</p>}
+        </div>
+      )}
+
+      {/* Coach card — only when summoned */}
+      {(agentLoading || agentMsg) && (
+        <div style={{ background: 'var(--surface-2)', border: '1px solid var(--accent)', borderRadius: 12, padding: '14px 16px', marginBottom: 16, position: 'relative' }}>
           {agentMsg && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Dial suggestion</div>
-              <p style={{ fontSize: 14, lineHeight: 1.6 }}>{agentMsg}</p>
-            </div>
+            <button onClick={() => setAgentMsg(null)} style={{ position: 'absolute', top: 10, right: 12, color: 'var(--text-muted)', fontSize: 18 }}>×</button>
           )}
+          <div style={{ fontSize: 11, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Your coach</div>
+          {agentLoading
+            ? <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Reading your cup…</p>
+            : <p style={{ fontSize: 15, lineHeight: 1.6, paddingRight: 20 }}>{agentMsg}</p>}
         </div>
       )}
 
@@ -241,6 +257,27 @@ export default function Brew({ profile, onSessionLogged }) {
           Shots ({sessions.length})
         </button>
       </div>
+
+      {/* Coach trigger — summoned, never pushed */}
+      <button
+        onClick={handleDialMeIn}
+        disabled={!navigator.onLine || agentLoading}
+        style={{
+          width: '100%', padding: '13px 0', borderRadius: 12, fontWeight: 600, fontSize: 15,
+          marginBottom: 8,
+          background: navigator.onLine ? 'var(--accent)' : 'var(--surface-2)',
+          color: navigator.onLine ? '#fff' : 'var(--text-muted)',
+          border: navigator.onLine ? 'none' : '1px solid var(--border)',
+          opacity: agentLoading ? 0.7 : 1,
+        }}
+      >
+        ☕ {agentLoading ? 'Reading your cup…' : 'Dial me in'}
+      </button>
+      {!navigator.onLine && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, textAlign: 'center' }}>
+          The coach needs a connection — your brews still log offline.
+        </p>
+      )}
 
       {/* Preset quick-switch */}
       {profile?.gear_presets?.length > 0 && (
