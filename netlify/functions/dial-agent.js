@@ -3,9 +3,10 @@
 // which is provider-agnostic — so swapping the LLM provider only touches THIS file.
 import { buildCoachMessages } from '../../src/core/coach.js';
 
-// The hard flaw-vs-preference call deserves the capable tier. Flip to 'gemini-2.5-flash'
-// for cost; a true cheap/premium router stays deferred until there's volume (see COMPASS).
-const MODEL = 'gemini-2.5-pro';
+// The hard flaw-vs-preference call deserves the capable tier; Pro needs billing enabled.
+// On Flash for now (free-tier quota) — re-evaluate Pro vs Flash on the acceptance test.
+// A true cheap/premium router stays deferred until there's volume (see COMPASS).
+const MODEL = 'gemini-2.5-flash';
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 const ok   = (suggestion) => ({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ suggestion }) });

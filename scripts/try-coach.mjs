@@ -18,7 +18,7 @@ if (!key) {
   process.exit(1);
 }
 
-const MODEL = 'gemini-2.5-pro';
+const MODEL = 'gemini-2.5-flash';
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 async function ask(label, session) {
