@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/core"
+    "test": "node --test src/core src/lib"
   },
   "dependencies": {
     "react": "^18.3.1",

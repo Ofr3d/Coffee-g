@@ -1,32 +1,59 @@
-// Contextual tips shown after logging a brew — one per outcome.
-export const OUTCOME_TIPS = {
+// Contextual tips shown after logging a brew — keyed by a FLAW-leaning descriptor
+// word (matches lexicon.js `hint: 'flaw'`). Shown only when the user named such a
+// word; otherwise no tip fires and the coach is the real helper. These are gentle
+// nudges, NOT the flaw-vs-preference verdict — that's the coach's job.
+export const FLAW_TIPS = {
   sour: {
     headline: 'Tasting sour or sharp?',
-    body: "That's underextraction — the good stuff didn't have enough time to dissolve. Grind finer, or extend your brew time slightly. The citrus will sweeten.",
+    body: "Often underextraction — the sweetness didn't have time to dissolve. Grind finer or extend the brew slightly. (If the beans are a bright light roast, this may just be their character — ask the coach.)",
+  },
+  sharp: {
+    headline: 'Tasting sharp or acidic?',
+    body: 'Frequently underextraction — try grinding a touch finer or brewing a little longer. On a bright bean, though, that acidity can be exactly the point.',
   },
   bitter: {
-    headline: 'Tasting harsh or bitter?',
-    body: "That's overextraction — you pulled too much. Grind coarser, shorten brew time, or lower your water temperature a few degrees.",
+    headline: 'Tasting bitter?',
+    body: "Classically overextraction — you pulled too much. Grind coarser, shorten the brew, or lower the water temp a few degrees.",
   },
-  weak: {
-    headline: 'Tasting thin or watery?',
-    body: 'Under-dosed or too coarse. Try adding 1–2g more coffee, or grind a step finer. Your ratio is probably off — aim for 1:15 to 1:17 for filter.',
-  },
-  strong: {
-    headline: 'Tasting too intense or heavy?',
-    body: 'Over-dosed or too fine for your ratio. Try pulling back 1g on dose, or grind slightly coarser. Adding a bit more water also softens intensity.',
+  harsh: {
+    headline: 'Tasting harsh?',
+    body: 'Usually overextraction or water too hot. Coarsen the grind a step and drop the temperature by 2–3°C.',
   },
   astringent: {
-    headline: 'Tasting dry or mouth-puckering?',
-    body: "Astringency usually means too-fine grind at too-high temperature, or stale beans. Lower your temp by 2°C and check your bean's roast date.",
+    headline: 'Mouth-drying or puckering?',
+    body: "Astringency usually means too-fine grind at too-high a temperature, or stale beans. Lower temp by 2°C and check the roast date.",
+  },
+  drying: {
+    headline: 'A drying finish?',
+    body: 'Often overextraction or too-hot water. Coarsen slightly and ease the temperature down.',
+  },
+  weak: {
+    headline: 'Tasting weak?',
+    body: 'Under-dosed or too coarse. Add 1–2g of coffee or grind a step finer. Aim for 1:15–1:17 on filter.',
+  },
+  watery: {
+    headline: 'Tasting watery?',
+    body: 'Usually too little coffee or too coarse a grind. Tighten the ratio and grind a step finer.',
+  },
+  thin: {
+    headline: 'Feeling thin-bodied?',
+    body: 'Can be underextraction or a low dose — try a touch finer or a gram more. Some light, delicate beans simply drink lighter, though.',
+  },
+  flat: {
+    headline: 'Tasting flat or lifeless?',
+    body: 'Often stale beans or an uneven extraction. Check the roast date, and look for clumping in the grinder.',
+  },
+  hollow: {
+    headline: 'Tasting hollow?',
+    body: 'Frequently under-developed extraction — grind finer or extend contact time a little.',
   },
   muddled: {
-    headline: 'Tasting flat or confused?',
-    body: 'Often an uneven extraction — some coarse, some fine particles. Check your grinder for clumping, or try a light WDT before your shot. Distribution matters.',
+    headline: 'Tasting muddled or confused?',
+    body: 'Usually uneven extraction — inconsistent particle size or poor distribution. Check the grinder for clumping; a light stir/WDT helps.',
   },
-  balanced: {
-    headline: 'You nailed it.',
-    body: "A balanced cup means your extraction hit the sweet spot. Lock in these parameters and try the same setup tomorrow — then you know it's repeatable.",
+  ashy: {
+    headline: 'Tasting ashy?',
+    body: 'Often overextraction or a very dark roast. Coarsen the grind and lower the temperature; if the beans are very dark, it may be the roast.',
   },
 };
 

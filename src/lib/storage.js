@@ -33,8 +33,11 @@ export function createProfile({ name, pinHash = null }) {
     pin_hash: pinHash,
     tier: 'user',
     discovery_level: 'conservative',
-    gear_presets: [],
-    taste_identity: {},
+    gear: [],            // hardware library — the single source of truth (Brew draws from here)
+    beans: [],           // bean bank
+    setups: [],          // favorites: named gear + bean + params combos, by id
+    taste_identity: {},  // descriptor tally
+    verdict_tally: {},    // enjoyed / not_enjoyed / enjoyed_but counts
     created_at: new Date().toISOString(),
   };
   localStorage.setItem(KEY_PROFILES, JSON.stringify([...profiles, profile]));
@@ -54,6 +57,123 @@ export function deleteProfile(id) {
   }
 }
 
+// ── Gear library ──────────────────────────────────────────────────────────────
+// All hardware lives on the profile — the single source of truth. Brew only
+// DRAWS from here; it never stores gear of its own. Retire, don't delete, so a
+// saved setup that referenced a shelved item can be made whole again.
+
+export function getGear(profileId, { activeOnly = false } = {}) {
+  const gear = getProfile(profileId)?.gear || [];
+  return activeOnly ? gear.filter(g => g.status !== 'retired') : gear;
+}
+
+export function addGear(profileId, { category, name, method = null }) {
+  const profile = getProfile(profileId);
+  if (!profile) return null;
+  const item = {
+    id: crypto.randomUUID(),
+    category,                    // 'grinder' | 'brewer' | 'kettle' | 'scale' | 'milk'
+    name,
+    method: method || null,      // brewers may carry a method; others stay null
+    status: 'active',
+    created_at: new Date().toISOString(),
+  };
+  updateProfile(profileId, { gear: [...(profile.gear || []), item] });
+  return item;
+}
+
+export function updateGear(profileId, id, changes) {
+  const profile = getProfile(profileId);
+  if (!profile) return;
+  const gear = (profile.gear || []).map(g => g.id === id ? { ...g, ...changes } : g);
+  updateProfile(profileId, { gear });
+}
+
+export function retireGear(profileId, id)   { updateGear(profileId, id, { status: 'retired' }); }
+export function unretireGear(profileId, id) { updateGear(profileId, id, { status: 'active' }); }
+
+// True permanent delete — rare, and the UI must warn how many setups it drops.
+export function deleteGear(profileId, id) {
+  const profile = getProfile(profileId);
+  if (!profile) return;
+  updateProfile(profileId, { gear: (profile.gear || []).filter(g => g.id !== id) });
+}
+
+// ── Bean bank ──────────────────────────────────────────────────────────────────
+// Beans are reused across the ~20 brews from one bag. process + roast_level are
+// exactly what the flaw-vs-preference fork reasons on. Edit/delete allowed (typo fix).
+
+export function getBeans(profileId) {
+  return getProfile(profileId)?.beans || [];
+}
+
+export function addBean(profileId, { name, origin = '', farm = '', process = '', roast_level = '' }) {
+  const profile = getProfile(profileId);
+  if (!profile) return null;
+  const bean = {
+    id: crypto.randomUUID(),
+    name, origin, farm, process, roast_level,
+    created_at: new Date().toISOString(),
+  };
+  updateProfile(profileId, { beans: [...(profile.beans || []), bean] });
+  return bean;
+}
+
+export function updateBean(profileId, id, changes) {
+  const profile = getProfile(profileId);
+  if (!profile) return;
+  const beans = (profile.beans || []).map(b => b.id === id ? { ...b, ...changes } : b);
+  updateProfile(profileId, { beans });
+}
+
+export function deleteBean(profileId, id) {
+  const profile = getProfile(profileId);
+  if (!profile) return;
+  updateProfile(profileId, { beans: (profile.beans || []).filter(b => b.id !== id) });
+}
+
+// ── Setups (favorites) ─────────────────────────────────────────────────────────
+// A favorite = a named { gear ids + bean id + dialed params } combo — the two-flick
+// recall door. References gear/beans by id so retiring or editing them never breaks
+// a saved favorite. Ordered by recency of use so this morning's setup floats up.
+
+export function getSetups(profileId) {
+  const setups = getProfile(profileId)?.setups || [];
+  return [...setups].sort((a, b) =>
+    (b.last_used_at || b.created_at || '').localeCompare(a.last_used_at || a.created_at || ''));
+}
+
+export function addSetup(profileId, { name, gear_ids = [], bean_id = null, method = null, params = {} }) {
+  const profile = getProfile(profileId);
+  if (!profile) return null;
+  const now = new Date().toISOString();
+  const setup = {
+    id: crypto.randomUUID(),
+    name, gear_ids, bean_id, method, params,
+    created_at: now,
+    last_used_at: now,
+  };
+  updateProfile(profileId, { setups: [...(profile.setups || []), setup] });
+  return setup;
+}
+
+export function updateSetup(profileId, id, changes) {
+  const profile = getProfile(profileId);
+  if (!profile) return;
+  const setups = (profile.setups || []).map(s => s.id === id ? { ...s, ...changes } : s);
+  updateProfile(profileId, { setups });
+}
+
+export function touchSetup(profileId, id) {
+  updateSetup(profileId, id, { last_used_at: new Date().toISOString() });
+}
+
+export function deleteSetup(profileId, id) {
+  const profile = getProfile(profileId);
+  if (!profile) return;
+  updateProfile(profileId, { setups: (profile.setups || []).filter(s => s.id !== id) });
+}
+
 // ── Sessions ─────────────────────────────────────────────────────────────────
 
 export function getSessions(profileId) {
@@ -69,12 +189,20 @@ export function addSession(profileId, session) {
   ];
   localStorage.setItem(`${KEY_SESSIONS}:${profileId}`, JSON.stringify(next));
 
-  // Update taste identity
+  // Update taste identity from the impression: a descriptor tally (the palate) +
+  // a verdict tally (enjoyed / not / enjoyed-but). Legacy sessions carried a single
+  // `outcome` string — still counted so old logs don't vanish from the bars.
   const profile = getProfile(profileId);
-  if (profile && session.outcome) {
-    const identity = { ...profile.taste_identity };
-    identity[session.outcome] = (identity[session.outcome] || 0) + 1;
-    updateProfile(profileId, { taste_identity: identity });
+  if (profile) {
+    const imp = session.impression || {};
+    const identity = { ...(profile.taste_identity || {}) };
+    (imp.descriptors || []).forEach(word => { identity[word] = (identity[word] || 0) + 1; });
+    const verdict_tally = { ...(profile.verdict_tally || {}) };
+    if (imp.verdict) verdict_tally[imp.verdict] = (verdict_tally[imp.verdict] || 0) + 1;
+    if (!imp.verdict && (imp.descriptors == null) && session.outcome) {
+      identity[session.outcome] = (identity[session.outcome] || 0) + 1;
+    }
+    updateProfile(profileId, { taste_identity: identity, verdict_tally });
   }
 
   return next;

@@ -96,7 +96,48 @@ Do not start a branch before the trunk (coach) is proven. Roasting and gear-comp
 7. **Proactively surface structural/systemic issues — don't wait to be asked.** Use the whole-system vantage to steer attention. When a "passing"/green state hides a degraded reality, that's the headline — lead with it, don't bury it under a flat symptom list.
 
 8. **Understand the end goal, then work the best solution to achieve it.** Don't anchor to the current file structure — if the best path requires structural changes, surface that need, consult, and decide together before building. Never silently work around a structural problem.
+9. **Best, not easy — never the easy solution just because it's easy.** "Easy" optimizes for the time it takes to write; "best" optimizes for the years it has to run. Before settling, name the easy option and the best option explicitly; if you ship the easy one, it must be because it *is* the best, not because it was less work. The easy path (hardcode it, special-case it, skip the test, paper over the symptom) is a loan against future sessions. This is #4 stated as a value.
+10. **No partial solutions.** If a feature is worth building, build it completely. A half-built fundamental is worse than a clearly-deferred one — it hides the gap. If scope must shrink, say what's deferred and why (don't silently drop it).
+11. **State the verification plan BEFORE you build.** Before writing a line, say exactly how the change will be proven: the test(s), the command to run them, and what "passing" looks like. If a thing can't be unit-tested (UI), name the concrete check (a build, a dev-server smoke, the coach acceptance harness). A change with no stated way to confirm it is not started. (Pairs with #5: #5 says a test must exist; #11 says you declare it up front.)
+12. **Human-validation zones — pause for explicit sign-off in the same session.** Some areas have a high cost of error; state the change and its blast radius and wait:
+    - **`src/core/coach.js` `SYSTEM_PROMPT`** — the flaw-vs-preference fork *is* the product. Any wording change needs owner sign-off AND a re-run of the acceptance harness.
+    - **Live coach behaviour / anything the app tells the user** — warmth and honesty are the moat; prove the change reads right before it ships.
+    - **Secrets** — `GEMINI_API_KEY` (Netlify dashboard + gitignored `.env`). Never log it, never commit it.
+    - **Deploy** — Netlify deploys are owner-triggered (git push / dashboard). Claude cannot deploy or restart; don't assume it happened.
+    - **The user's stored data** (see #13).
+13. **Protect irreplaceable stored data — merge, never blank.** The user's `localStorage` (profiles, gear, beans, sessions, setups, taste_identity) is hand-built and unrecoverable. Never overwrite a profile wholesale; read-modify-write with targeted updates (as `storage.js` does via `updateProfile`). A migration that could drop user data is a human-validation zone.
 
 **Plus two on communication:**
+- **Concise in words, never in care.** Communicate efficiently — drop filler, lead with the answer. This governs *prose only*. It never licenses a shorter solution, a skipped test, a dropped edge case, or a cold/rushed bit of UX. Concise words, complete work.
 - **Be decisive, not a suggester.** No "consider" / "maybe" hedging — commit to a recommendation.
 - **No half-instructions.** Every recommendation is a complete, actionable chain. Don't say "rebalance" or "reduce" — say exactly what to do on both sides. Don't punt work back to the user that the system could do itself.
+
+---
+
+## Test regime
+
+The discipline that separates good work from wasted time. Migrated from the Dividend Bot's regime, adapted to this stack.
+
+**Toolchain (zero new deps):**
+- `npm test` → `node --test src/core src/lib` — fast unit tests on the **pure** logic: the coach engine's contract (`coach.test.js`), the data layer (`storage.test.js`), the word bank (`lexicon.test.js`).
+- `npm run build` — must stay clean; a green build is the compile-time check for the UI (import/syntax/JSX errors).
+- Browser-only modules (`storage.js` uses `localStorage`) are tested in Node via a tiny in-memory shim declared before import — see the top of `storage.test.js`. Don't skip testing a module because "it needs a browser."
+
+**Every change gets a test, pushed down the stack.** Pure logic (core/lib) → unit test. UI → clean build + a dev-server smoke (`npm run dev`). Prefer moving logic *out* of components into `core`/`lib` so it can be unit-tested cheaply.
+
+**The keystone is proven separately.** The unit tests assert the *payload contract* (that the engine encodes the fork mandate + the brew facts). The coach's actual *judgment* — the flaw-vs-preference call — is proven by the two-cup acceptance harness `scripts/try-coach.mjs` (engine → real Gemini). It needs `GEMINI_API_KEY` and hits the network, so it is **owner-run / owner-verified**; it never prints or commits the key. Re-run it after any `SYSTEM_PROMPT` or payload change.
+
+### Session startup — run before touching anything
+```bash
+npm test                 # engine + lib green?  (if failing, fix before adding anything new)
+npm run build            # build clean?
+git log --oneline -10    # what changed recently?
+# then read COMPASS.md ("where we are") + this file
+```
+
+### Blindspot review — ask this periodically, out loud
+The unit + acceptance tests confirm the coach does what we **imagined**. By construction they cannot surface what we **didn't think to imagine**. So at the end of a big session, or when things feel "done," stop and ask: **"What's in our blindspot?"** The list below is a *seed*, not the answer — the next real blindspot won't be on any list.
+- **The fork under unseen inputs** — does flaw-vs-preference still hold on beans, roasts, and methods the acceptance harness never tried?
+- **Graceful degradation** — with sparse or no history, does the coach stay honest about certainty (never fake precision, never assume novice)?
+- **Accuracy ≠ preference (spine #7)** — are we merging "brewed right?" with "did you like it?" anywhere in data, tally, or prompt?
+- **Data correctness, not just presence** — a saved gear/bean id that no longer resolves; a setup pointing at retired gear; a descriptor tally drifting from reality.

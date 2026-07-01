@@ -44,8 +44,7 @@ await ask('CUP 1 — sour + coarse (expect: fix it)', {
   bean: { name: 'Torebadiya', origin: 'Ethiopia', process: 'Washed' },
   method: 'V60', vessel: 'V60-02',
   parameters: { dose: '15', temp: '93', grind: '32', grind_device: 'Comandante', total_yield: 250 },
-  outcome: 'sour',
-  notes: 'sharp, lemony, a bit hollow',
+  impression: { verdict: 'enjoyed_but', descriptors: ['sour', 'sharp', 'hollow'], disliked: 'sharp and a bit hollow' },
 });
 
 // CUP 2 — a preference: sensible in-range espresso, user dislikes a bright/acidic note →
@@ -54,8 +53,7 @@ await ask('CUP 2 — in-range but disliked (expect: it\'s the bean, not you)', {
   bean: { name: 'Kayon Mountain', origin: 'Ethiopia', process: 'Natural' },
   method: 'Espresso',
   parameters: { dose: '18', yield: '36', time: '28', grind: '12', grind_device: 'Niche Zero' },
-  outcome: 'sour',
-  notes: 'pulled well, even flow, but I just don\'t enjoy this bright berry acidity',
+  impression: { verdict: 'not_enjoyed', descriptors: ['citrusy', 'berry'], disliked: 'pulled well and even, but I just don\'t enjoy this bright berry acidity' },
 });
 
 console.log('');

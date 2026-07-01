@@ -101,7 +101,7 @@ export default function App() {
   const tabs = {
     discover: <Discover profile={profile} />,
     beans:    <Beans profile={profile} />,
-    brew:     <Brew profile={profile} onSessionLogged={() => setProfile({ ...profile })} />,
+    brew:     <Brew profile={profile} onUpdate={handleProfileUpdate} onSessionLogged={() => setProfile({ ...profile })} />,
     train:    <Train />,
     me:       <Me profile={profile} onUpdate={handleProfileUpdate} onSwitch={handleSwitchProfile} />,
   };

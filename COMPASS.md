@@ -2,7 +2,7 @@
 
 *This is the living heart of the project. Read it first, and read it whole. It is not a spec — the specs are elsewhere. This is the why, the feel, and where we are right now. If you are Claude Code (or anyone) picking this up: the thing that matters most is not in the file tree, it's here. Work in this register.*
 
-*Last updated: 2026-06-28*
+*Last updated: 2026-07-01*
 
 ---
 
@@ -119,7 +119,10 @@ coffee-g/
     │   └── TabBar.jsx        bottom 5-tab nav
     ├── lib/
     │   ├── storage.js      localStorage, namespaced PER PROFILE (current_profile_id isolation).
-    │   │                   Holds taste_identity as a simple tally map {tag: count}. ALL persistence here.
+    │   │                   Home of the gear library, bean bank, setups/favorites, sessions, and
+    │   │                   taste_identity (a descriptor tally {word: count}) + verdict_tally. ALL persistence here.
+    │   ├── lexicon.js      our own descriptor word bank (the impression word-assist), with an
+    │   │                   internal flaw/character/body hint used only by the coach.
     │   ├── tips.js         the Learning-Loop tip bank (contextual, dismissible).
     │   └── recipes.js      Phase-1 seed RECIPES + TIER_LABELS.
     └── tabs/
@@ -128,7 +131,8 @@ coffee-g/
         ├── Brew.jsx        THE KEYSTONE TAB. Dialer form + log + Shots timeline + the
         │                   "☕ Dial me in" coach trigger (summoned, never auto-fired).
         ├── Train.jsx       casual swipeable palate-education feed.
-        └── Me.jsx          taste-identity bars (from the tally map), gear presets, profile.
+        └── Me.jsx          the hardware home: gear library (categories, retire/delete), bean bank,
+                            favorites/setups manager, taste-identity bars (descriptor tally), profile.
 ```
 
 **Tab order in the UI: Discover · Beans · Brew · Train · Me.**
@@ -162,9 +166,15 @@ coffee-g/
 
 **Working-priority rule (founder, 2026-06-28):** **UX first, infrastructure second, UI/visual only when something is functionally broken.** No cosmetic polish while UX or infra work is open. The founder and Claude remind each other when work drifts into pixel-polish. (This is *what to work on*, not just how — it reorders the backlog below.)
 
-**Next up — UX of the dialing flow (founder feedback from first real hands-on, 2026-06-28).** The app is *a personal coffee diary + a helper to dial the cup.* First contact surfaced that the *helper* flow isn't designed — it's piggybacking on the log form's state. Concrete observations, sorted by the priority rule:
-- **UX — the real work.** "Dial me in" sits at the *top* of the Brew tab, so the natural first move is to press it *before* entering anything. It then reads the form's **defaults + the saved gear preset** (method defaults to V60; `applyPreset` auto-fills method/vessel/grinder/temp on load — `Brew.jsx:113`) and produces a generic read — which *feels* like it "invented data I never typed." Entering the variables needs to feel **welcoming and intentional**, and the coach should be summoned *after* there's something to read, not before. This is real design — do it with a clear head, in the warm thinking room, before any code.
-- **UX/functional — coach assumes a beginner.** With no logged history we literally send the model *"Recent outcomes: first brew / no history yet"* (`coach.js:80`), so it says things like "your first cup with these beans" — wrong for an experienced user who just hasn't logged here. *No app history ≠ novice.* Fix is a careful wording change in the keystone `SYSTEM_PROMPT`/payload; founder to approve the wording.
+**Just built — the Brew fundamentals (2026-07-01).** Founder's second hands-on flagged missing fundamentals; built as real data foundations (roots), not form patches. Plan: `~/.claude/plans/glowing-enchanting-stallman.md`.
+- **Gear library + bean bank + favorites are now real object stores** on the profile (`storage.js`): gear `{category, name, status: active/retired}`, beans `{name, origin, farm, process, roast_level}`, and **setups/favorites** = named `{gear ids + bean id + params}` combos (recency-ordered, referenced by id so retiring gear never breaks a favorite). Decided architecture: **all hardware lives in the Profile — the single source of truth — and Brew *draws* from it.**
+- **Blank means blank** — no default method, no auto-apply preset on mount (the old phantom-data source is gone). Brew disables *Dial me in* / *Log* until an active grinder + brewer (drawn from the profile) + method are chosen.
+- **Pour-over is phased** — Bloom / 1st pour / End labeled rows; only Bloom 0:00 is a real default, the rest are greyed suggestions; "＋" adds a phase beside the last row.
+- **The conclusion is an impression, not self-diagnosis** — enjoyment verdict (Enjoyed / Enjoyed-but / Didn't) + optional what-was-good / what-wasn't + a word bank (`lexicon.js`, our own; WCR/SCA reference only). The old `sour/bitter/…` chips are gone — the beginner no longer has to name the flaw; that's the coach's job.
+- **Coach engine (keystone) reworked** — reads `session.impression` (verdict + descriptors + liked/disliked); `DESCRIPTOR_MEANING` keeps the flaw-vs-character fork hint per word; "no app history" no longer reads as novice (*history ≠ inexperience*). `taste_identity` is now a descriptor tally. **20 unit tests green, build clean, dev boots.**
+- **Still to verify:** live-phone end-to-end of the deployed Netlify coach on the new payload (the in-browser click-through wasn't done here — no browser tool this session).
+
+**Deferred on purpose (not lost):** the auto "save this / update this setup?" success prompt (manual save-as-favorite ships now), the full cup-first "what cup?" catalog, milk-drink params, consent/opt-out layer, community impression mining.
 - **Vision (founder's call, when clear).** Train is, by Phase-1 design, a calm static education feed (`tips.js` seed cards, expand-to-read) — **not** the coach. Founder felt it should be more like a "personal trainer." Decide: keep Train a calm reading feed, or make it active. Bigger than a fix.
 - **UI — PARKED by the priority rule.** Train card headers clip on the phone (header top showing in the lower third of the bubble). Pure visual; it waits **unless** it's so clipped the header is genuinely unreadable (which would make it functional).
 
@@ -192,6 +202,7 @@ These exist and are worth reading when you have time, but they are *background*,
 - `coffee-g-session-record.md` — the narrative journey of how the thinking unfolded.
 - `coffee-g-dial-agent-design-notes.md` — the dialing intelligence mechanics (confidence color, degradation tiers, optional params).
 - `coffee-g-strategy-design-notes-session2.md` — pros, marketplace reach, verification harvest, principles in depth.
+- `coffee-g-ux-brew-flow.md` — **decided UX brief**: cup-first Brew flow, gear + bean libraries (retire-not-delete), two-flick setups, cup-types-as-data, the impression layer + declared-not-stolen consent. The next major build after the coach is verified.
 - `coffee-g-spec.md`, `coffee-g-phase2-spec1-foundation.md`, `…spec2-community-recipes.md`, `…spec3-affiliate-tracking.md` — the build specs.
 
 ---
